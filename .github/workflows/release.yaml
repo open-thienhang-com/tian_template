@@ -1,49 +1,46 @@
-on:
-  release:
-    types:
-      - published
+name: Release
 
-name: release
+on:
+  push:
+    tags:
+      - '*.*.*'
+
+permissions:
+  contents: read
 
 jobs:
-  pypi:
-    name: upload release to PyPI
+  pypi-publish:
+    name: Upload release to PyPI
     runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/blurry-cli/
     permissions:
       id-token: write
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v4
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.10"
 
-      - name: deps
-        run: python -m pip install -U build
-
-      - name: build
-        run: python -m build
-
-      - name: mint API token
-        id: mint-token
+      - name: Install Poetry
         run: |
-          # retrieve the ambient OIDC token
-          resp=$(curl -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=pypi")
-          oidc_token=$(jq -r '.value' <<< "${resp}")
+          curl -sSL https://install.python-poetry.org | python - -y
 
-          # exchange the OIDC token for an API token
-          resp=$(curl -X POST https://pypi.org/_/oidc/mint-token -d "{\"token\": \"${oidc_token}\"}")
-          api_token=$(jq -r '.token' <<< "${resp}")
+      - name: Update PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-          # mask the newly minted API token, so that we don't accidentally leak it
-          echo "::add-mask::${api_token}"
+      - name: Update Poetry configuration
+        run: poetry config virtualenvs.create false
 
-          # see the next step in the workflow for an example of using this step output
-          echo "api-token=${api_token}" >> "${GITHUB_OUTPUT}"
+      - name: Install dependencies
+        run: poetry install --sync --no-interaction
 
-      - name: publish
-        # gh-action-pypi-publish uses TWINE_PASSWORD automatically
+      - name: Package project
+        run: poetry build
+
+      - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ steps.mint-token.outputs.api-token }}
